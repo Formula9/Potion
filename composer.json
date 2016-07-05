@@ -1,0 +1,29 @@
+{
+    "name": "formula9/potion",
+    "type": "library",
+    "description": "A simple Dependency Injection Container based on Pimple.",
+    "keywords": ["dependency injection", "container"],
+    "homepage": "https://github.com/Formula9",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Fabien Potencier",
+            "email": "fabien@symfony.com"
+        },
+        {
+            "name": "Greg Truesdell",
+            "email": "odd.greg@gmail.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.0.4"
+    },
+    "autoload": {
+        "psr-0": { "Pimple": "src/" }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-master": "3.0.x-dev"
+        }
+    }
+}

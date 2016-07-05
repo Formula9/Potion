@@ -27,18 +27,26 @@
 namespace Pimple;
 
 /**
- * Container main class.
+ * Potion is based heavily on Pimple. The code that follows is primarily the same as
+ * the original Pimple code. Changes have been made to support features or ease-of-use
+ * changes required by the Formula Nine framework.
  *
- * @author  Fabien Potencier
+ * The class retains its original moniker to a) respect the original author and b) to
+ * remain compatible with the Silex (Formula Nine Core) foundation.
  */
 class Container implements \ArrayAccess
 {
-    private $values = array();
     private $factories;
+
+    private $frozen = [];
+
+    private $keys = [];
+
     private $protected;
-    private $frozen = array();
-    private $raw = array();
-    private $keys = array();
+
+    private $raw = [];
+
+    private $values = [];
 
     /**
      * Instantiate the container.
@@ -47,7 +55,7 @@ class Container implements \ArrayAccess
      *
      * @param array $values The parameters or objects.
      */
-    public function __construct(array $values = array())
+    public function __construct(array $values = [])
     {
         $this->factories = new \SplObjectStorage();
         $this->protected = new \SplObjectStorage();
@@ -55,6 +63,129 @@ class Container implements \ArrayAccess
         foreach ($values as $key => $value) {
             $this->offsetSet($key, $value);
         }
+    }
+
+    /**
+     * Extends an object definition.
+     *
+     * Useful when you want to extend an existing object definition,
+     * without necessarily loading that object.
+     *
+     * @param string   $id       The unique identifier for the object
+     * @param callable $callable A service definition to extend the original
+     *
+     * @return callable The wrapped callable
+     *
+     * @throws \InvalidArgumentException if the identifier is not defined or not a service definition
+     */
+    public function extend($id, $callable)
+    {
+        if ( ! isset($this->keys[$id])) {
+            throw new \InvalidArgumentException(sprintf('Identifier "%s" is not defined.', $id));
+        }
+
+        if ( ! is_object($this->values[$id]) || ! method_exists($this->values[$id], '__invoke')) {
+            throw new \InvalidArgumentException(sprintf('Identifier "%s" does not contain an object definition.', $id));
+        }
+
+        if ( ! is_object($callable) || ! method_exists($callable, '__invoke')) {
+            throw new \InvalidArgumentException('Extension service definition is not a Closure or invokable object.');
+        }
+
+        /** @var mixed|string $factory */
+        $factory = $this->values[$id];
+
+        $extended = function ($c) use ($callable, $factory) {
+            return $callable($factory($c), $c);
+        };
+
+        if (isset($this->factories[$factory])) {
+            $this->factories->detach($factory);
+            $this->factories->attach($extended);
+        }
+
+        return $this[$id] = $extended;
+    }
+
+    /**
+     * Marks a callable as being a factory service.
+     *
+     * @param callable $callable A service definition to be used as a factory
+     *
+     * @return callable The passed callable
+     *
+     * @throws \InvalidArgumentException Service definition has to be a closure of an invokable object
+     */
+    public function factory($callable)
+    {
+        if ( ! method_exists($callable, '__invoke')) {
+            throw new \InvalidArgumentException('Service definition is not a Closure or invokable object.');
+        }
+
+        /** @noinspection PhpParamsInspection */
+        $this->factories->attach($callable);
+
+        return $callable;
+    }
+
+    /**
+     * Returns all defined value names.
+     *
+     * @return array An array of value names
+     */
+    public function keys()
+    {
+        return array_keys($this->values);
+    }
+
+    /**
+     * Checks if a parameter or an object is set.
+     *
+     * @param string $id The unique identifier for the parameter or object
+     *
+     * @return bool
+     */
+    public function offsetExists($id)
+    {
+        return isset($this->keys[$id]);
+    }
+
+    /**
+     * Gets a parameter or an object.
+     *
+     * @param string $id The unique identifier for the parameter or object
+     *
+     * @return mixed The value of the parameter or an object
+     *
+     * @throws \InvalidArgumentException if the identifier is not defined
+     */
+    public function offsetGet($id)
+    {
+        if ( ! isset($this->keys[$id])) {
+            throw new \InvalidArgumentException(sprintf('Identifier "%s" is not defined.', $id));
+        }
+
+        if (
+            isset($this->raw[$id])
+            || ! is_object($this->values[$id])
+            || isset($this->protected[$this->values[$id]])
+            || ! method_exists($this->values[$id], '__invoke')
+        ) {
+            return $this->values[$id];
+        }
+
+        if (isset($this->factories[$this->values[$id]])) {
+            return $this->values[$id]($this);
+        }
+
+        /** @var string $raw */
+        $raw = $this->values[$id];
+        $val = $this->values[$id] = $raw($this);
+        $this->raw[$id] = $raw;
+
+        $this->frozen[$id] = TRUE;
+
+        return $val;
     }
 
     /**
@@ -78,56 +209,7 @@ class Container implements \ArrayAccess
         }
 
         $this->values[$id] = $value;
-        $this->keys[$id] = true;
-    }
-
-    /**
-     * Gets a parameter or an object.
-     *
-     * @param string $id The unique identifier for the parameter or object
-     *
-     * @return mixed The value of the parameter or an object
-     *
-     * @throws \InvalidArgumentException if the identifier is not defined
-     */
-    public function offsetGet($id)
-    {
-        if (!isset($this->keys[$id])) {
-            throw new \InvalidArgumentException(sprintf('Identifier "%s" is not defined.', $id));
-        }
-
-        if (
-            isset($this->raw[$id])
-            || !is_object($this->values[$id])
-            || isset($this->protected[$this->values[$id]])
-            || !method_exists($this->values[$id], '__invoke')
-        ) {
-            return $this->values[$id];
-        }
-
-        if (isset($this->factories[$this->values[$id]])) {
-            return $this->values[$id]($this);
-        }
-
-        $raw = $this->values[$id];
-        $val = $this->values[$id] = $raw($this);
-        $this->raw[$id] = $raw;
-
-        $this->frozen[$id] = true;
-
-        return $val;
-    }
-
-    /**
-     * Checks if a parameter or an object is set.
-     *
-     * @param string $id The unique identifier for the parameter or object
-     *
-     * @return bool
-     */
-    public function offsetExists($id)
-    {
-        return isset($this->keys[$id]);
+        $this->keys[$id] = TRUE;
     }
 
     /**
@@ -147,26 +229,6 @@ class Container implements \ArrayAccess
     }
 
     /**
-     * Marks a callable as being a factory service.
-     *
-     * @param callable $callable A service definition to be used as a factory
-     *
-     * @return callable The passed callable
-     *
-     * @throws \InvalidArgumentException Service definition has to be a closure of an invokable object
-     */
-    public function factory($callable)
-    {
-        if (!method_exists($callable, '__invoke')) {
-            throw new \InvalidArgumentException('Service definition is not a Closure or invokable object.');
-        }
-
-        $this->factories->attach($callable);
-
-        return $callable;
-    }
-
-    /**
      * Protects a callable from being interpreted as a service.
      *
      * This is useful when you want to store a callable as a parameter.
@@ -179,10 +241,11 @@ class Container implements \ArrayAccess
      */
     public function protect($callable)
     {
-        if (!method_exists($callable, '__invoke')) {
+        if ( ! method_exists($callable, '__invoke')) {
             throw new \InvalidArgumentException('Callable is not a Closure or invokable object.');
         }
 
+        /** @noinspection PhpParamsInspection */
         $this->protected->attach($callable);
 
         return $callable;
@@ -199,7 +262,7 @@ class Container implements \ArrayAccess
      */
     public function raw($id)
     {
-        if (!isset($this->keys[$id])) {
+        if ( ! isset($this->keys[$id])) {
             throw new \InvalidArgumentException(sprintf('Identifier "%s" is not defined.', $id));
         }
 
@@ -211,57 +274,6 @@ class Container implements \ArrayAccess
     }
 
     /**
-     * Extends an object definition.
-     *
-     * Useful when you want to extend an existing object definition,
-     * without necessarily loading that object.
-     *
-     * @param string   $id       The unique identifier for the object
-     * @param callable $callable A service definition to extend the original
-     *
-     * @return callable The wrapped callable
-     *
-     * @throws \InvalidArgumentException if the identifier is not defined or not a service definition
-     */
-    public function extend($id, $callable)
-    {
-        if (!isset($this->keys[$id])) {
-            throw new \InvalidArgumentException(sprintf('Identifier "%s" is not defined.', $id));
-        }
-
-        if (!is_object($this->values[$id]) || !method_exists($this->values[$id], '__invoke')) {
-            throw new \InvalidArgumentException(sprintf('Identifier "%s" does not contain an object definition.', $id));
-        }
-
-        if (!is_object($callable) || !method_exists($callable, '__invoke')) {
-            throw new \InvalidArgumentException('Extension service definition is not a Closure or invokable object.');
-        }
-
-        $factory = $this->values[$id];
-
-        $extended = function ($c) use ($callable, $factory) {
-            return $callable($factory($c), $c);
-        };
-
-        if (isset($this->factories[$factory])) {
-            $this->factories->detach($factory);
-            $this->factories->attach($extended);
-        }
-
-        return $this[$id] = $extended;
-    }
-
-    /**
-     * Returns all defined value names.
-     *
-     * @return array An array of value names
-     */
-    public function keys()
-    {
-        return array_keys($this->values);
-    }
-
-    /**
      * Registers a service provider.
      *
      * @param ServiceProviderInterface $provider A ServiceProviderInterface instance
@@ -269,7 +281,7 @@ class Container implements \ArrayAccess
      *
      * @return static
      */
-    public function register(ServiceProviderInterface $provider, array $values = array())
+    public function register(ServiceProviderInterface $provider, array $values = [])
     {
         $provider->register($this);
 

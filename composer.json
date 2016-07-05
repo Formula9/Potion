@@ -20,10 +20,5 @@
     },
     "autoload": {
         "psr-0": { "Pimple": "src/" }
-    },
-    "extra": {
-        "branch-alias": {
-            "dev-master": "3.0.x-dev"
-        }
     }
 }
